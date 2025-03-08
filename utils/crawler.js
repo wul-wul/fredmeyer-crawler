@@ -162,3 +162,95 @@ async function crawlProductDetails(url, index = null, total = null, onLog) {
     } catch {
       // 다음 방법 시도
     }
+// 방법 2: 고해상도 이미지 요소 찾기
+    if (images.length === 0) {
+      try {
+        const zoomImgs = await page.$$eval(".iiz__zoom-img", els => 
+          els.map(el => el.getAttribute("src")).filter(Boolean).slice(0, 3)
+        );
+        
+        if (zoomImgs.length > 0) {
+          images = zoomImgs;
+          onLog(`확대 이미지 찾음: ${images[0]}`);
+        }
+      } catch {
+        // 다음 방법 시도
+      }
+    }
+    
+    // 방법 3: 일반 이미지 중 xlarge 찾기
+    if (images.length === 0) {
+      try {
+        const xlargeImages = await page.$$eval("img", els => 
+          els.map(el => el.getAttribute("src"))
+            .filter(src => src && src.includes("xlarge") && 
+              (src.includes("kroger.com/product/images") || src.includes("fredmeyer.com/product/images")))
+            .slice(0, 3)
+        );
+        
+        if (xlargeImages.length > 0) {
+          images = xlargeImages;
+        }
+      } catch {
+        // 다음 방법 시도
+      }
+    }
+    
+    // 방법 4: 일반 이미지 찾기 (xlarge가 없는 경우)
+    if (images.length === 0) {
+      try {
+        const productImages = await page.$$eval("img", els => 
+          els.map(el => el.getAttribute("src"))
+            .filter(src => src && 
+              (src.includes("kroger.com/product/images") || src.includes("fredmeyer.com/product/images")))
+            .slice(0, 3)
+            .map(src => src.includes("large") ? src.replace("large", "xlarge") : src)
+        );
+        
+        if (productImages.length > 0) {
+          images = productImages;
+        }
+      } catch {
+        // 계속 진행
+      }
+    }
+    
+    // 이미지가 부족한 경우 처리
+    if (images.length === 0) {
+      onLog("이미지를 찾을 수 없습니다. 더미 이미지를 사용합니다.");
+      // 더미 이미지 URL 생성
+      const dummyImage = "https://www.fredmeyer.com/product/images/xlarge/dummy";
+      images = [dummyImage, dummyImage, dummyImage];
+    } else if (images.length > 0) {
+      const firstImage = images[0];
+      // 2번 이미지가 없으면 1번 이미지 사용
+      if (images.length < 2) {
+        images.push(firstImage);
+        onLog("2번 이미지 없음: 1번 이미지로 대체합니다.");
+      }
+      // 3번 이미지가 없으면 1번 이미지 사용
+      if (images.length < 3) {
+        images.push(firstImage);
+        onLog("3번 이미지 없음: 1번 이미지로 대체합니다.");
+      }
+    }
+    
+    // 결과 반환
+    return {
+      "상품명": name,
+      "숫자 가격": priceNumeric,
+      "상품 링크": url,
+      "이미지1": images[0] || "이미지 없음",
+      "이미지2": images[1] || "이미지 없음",
+      "이미지3": images[2] || "이미지 없음"
+    };
+    
+  } catch (error) {
+    onLog(`상세 페이지 크롤링 중 오류 발생: ${error.message}`);
+    return null;
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
+}
