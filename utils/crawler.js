@@ -572,3 +572,315 @@ onLog("\n3. 상품 카드 찾는 중...");
           onLog(`상품 ${i+1} 상세 정보 크롤링 실패: ${error.message}`);
         }
       }
+if (products.length > 0) {
+        // 이미지 다운로드
+        if (downloadImages) {
+          await downloadProductImages(products, imagesDir, onLog);
+        }
+        
+        // Excel 저장
+        const filePath = await saveToExcel(products, resultsDir, timestamp, onLog);
+        onLog(`\n총 ${products.length}개의 상품 정보를 찾았습니다.`);
+        return { filePath, count: products.length };
+      } else {
+        onLog("\n저장할 상품 정보가 없습니다.");
+        return { filePath: null, count: 0 };
+      }
+    } catch (error) {
+      onLog(`\n크롤링 중 오류 발생: ${error.message}`);
+      onLog(error.stack);
+      throw error;
+    } finally {
+      onLog("\n브라우저 종료 중...");
+      if (browser) {
+        try {
+          await browser.close();
+        } catch {
+          // 무시
+        }
+      }
+    }
+  }
+}
+
+// 상품 이미지 다운로드 함수
+async function downloadProductImages(products, imagesDir, onLog) {
+  onLog("\n이미지 다운로드 시작...");
+  
+  // 각 상품의 이미지 다운로드
+  for (let i = 0; i < products.length; i++) {
+    const product = products[i];
+    const productNum = i + 1;  // 상품 번호
+    
+    // 상품코드에서 접미사 부분 추출 (예: W001)
+    const codeParts = product["판매자 상품코드"].split('-');
+    const codeSuffix = codeParts[1] || `W${String(productNum).padStart(3, '0')}`;
+    
+    const productName = product["상품명"];
+    
+    // 상품 번호 추가
+    product["번호"] = productNum;
+    
+    // 파일명으로 사용할 수 없는 문자 제거
+    const safeName = productName.replace(/[\\/*?:"<>|]/g, "").substring(0, 50);  // 이름 길이 제한
+    
+    onLog(`\n상품 ${productNum}/${products.length} 이미지 다운로드 중: ${safeName}`);
+    
+    // 각 이미지 다운로드
+    let firstImagePath = null;  // 첫 번째 이미지 경로 저장용
+    
+    // 먼저 1번 이미지 다운로드 시도
+    const img1Url = product["이미지1"];
+    if (img1Url && img1Url !== "이미지 없음") {
+      try {
+        // 이미지 파일명 사용
+        let img1Filename = product["이미지파일1"];
+        if (!img1Filename) {
+          img1Filename = `${codeSuffix}-1.jpg`;
+        }
+        
+        const img1Path = path.join(imagesDir, img1Filename);
+        
+        // 이미지 다운로드
+        await downloadImage(img1Url, img1Path);
+        
+        // 첫 번째 이미지 경로 저장
+        firstImagePath = img1Path;
+        
+        // 이미지 캔버스 중앙에 배치 (1000x1000)
+        try {
+          const fileSize = await processImage(img1Path);
+          onLog(`  이미지 1 캔버스 중앙 배치 완료 (1000x1000, ${fileSize.toFixed(1)}KB)`);
+        } catch (error) {
+          onLog(`  이미지 1 캔버스 처리 중 오류: ${error.message}`);
+        }
+        
+        onLog(`  이미지 1 다운로드 완료: ${img1Filename}`);
+        
+        // 이미지 파일명과 URL 저장
+        product["이미지파일1"] = img1Filename;
+        product["이미지1"] = img1Url;
+      } catch (error) {
+        onLog(`  이미지 1 다운로드 중 오류: ${error.message}`);
+        firstImagePath = null;
+      }
+    } else {
+      onLog("  이미지 1을 찾을 수 없습니다.");
+      firstImagePath = null;
+    }
+    
+    // 2번, 3번 이미지 처리
+    for (let j = 2; j <= 3; j++) {
+      const imgUrl = product[`이미지${j}`];
+      let imgFilename = product[`이미지파일${j}`];
+      
+      if (!imgFilename) {
+        imgFilename = `${codeSuffix}-${j}.jpg`;
+      }
+      
+      const imgPath = path.join(imagesDir, imgFilename);
+      
+      // 1번 이미지가 있고, 2번 또는 3번 이미지가 없거나 다운로드 실패한 경우
+      if (firstImagePath && (!imgUrl || imgUrl === "이미지 없음")) {
+        try {
+          await copyFile(firstImagePath, imgPath);
+          onLog(`  이미지 ${j}: 1번 이미지를 복사하여 사용`);
+          
+          // 이미지 파일명과 URL 저장
+          product[`이미지파일${j}`] = imgFilename;
+          product[`이미지${j}`] = product["이미지1"] || "이미지 없음";
+        } catch (error) {
+          onLog(`  이미지 ${j} 복사 중 오류: ${error.message}`);
+          product[`이미지파일${j}`] = "";
+          product[`이미지${j}`] = "이미지 없음";
+        }
+      } 
+      // 2번, 3번 이미지가 있는 경우 정상적으로 다운로드
+      else if (imgUrl && imgUrl !== "이미지 없음") {
+        try {
+          await downloadImage(imgUrl, imgPath);
+          
+          // 이미지 캔버스 중앙에 배치 (1000x1000)
+          try {
+            const fileSize = await processImage(imgPath);
+            onLog(`  이미지 ${j} 캔버스 중앙 배치 완료 (1000x1000, ${fileSize.toFixed(1)}KB)`);
+          } catch (error) {
+            onLog(`  이미지 ${j} 캔버스 처리 중 오류: ${error.message}`);
+          }
+          
+          onLog(`  이미지 ${j} 다운로드 완료: ${imgFilename}`);
+          
+          // 이미지 파일명과 URL 저장
+          product[`이미지파일${j}`] = imgFilename;
+          product[`이미지${j}`] = imgUrl;
+        } catch (error) {
+          onLog(`  이미지 ${j} 다운로드 중 오류: ${error.message}`);
+          
+          // 오류 발생 시 1번 이미지 복사
+          if (firstImagePath) {
+            try {
+              await copyFile(firstImagePath, imgPath);
+              onLog(`  이미지 ${j}: 오류 발생으로 1번 이미지를 복사하여 사용`);
+              product[`이미지파일${j}`] = imgFilename;
+              product[`이미지${j}`] = product["이미지1"] || "이미지 없음";
+            } catch {
+              product[`이미지파일${j}`] = "";
+              product[`이미지${j}`] = "이미지 없음";
+            }
+          } else {
+            product[`이미지파일${j}`] = "";
+            product[`이미지${j}`] = "이미지 없음";
+          }
+        }
+      } 
+      // 이미지 URL이 없고 1번 이미지도 없는 경우
+      else {
+        product[`이미지파일${j}`] = "";
+        product[`이미지${j}`] = "이미지 없음";
+      }
+    }
+  }
+  
+  onLog("\n이미지 다운로드 완료");
+  return imagesDir;
+}
+
+// 크롤링 결과를 엑셀 파일로 저장하는 함수
+async function saveToExcel(products, resultsDir, timestamp, onLog) {
+  try {
+    // 파일명 생성
+    const filename = path.join(resultsDir, `fredmeyer_products_${timestamp}.xlsx`);
+    
+    // 현재 날짜 (YYYYMMDD 형식)
+    const currentDate = dayjs().format("YYYYMMDD");
+    
+    // 각 상품에 대표이미지, 추가이미지, 상세설명 필드 추가
+    for (const product of products) {
+      // 판매자 상품코드에서 날짜 부분 추출 (예: 20250305-W001 -> 20250305)
+      const datePart = (product["판매자 상품코드"] || "").split("-")[0] || currentDate;
+      
+      // 대표이미지 필드 추가 (형식: http://www.runtower.co.kr/picture/날짜/이미지파일명)
+      if (product["이미지파일1"]) {
+        product["대표이미지"] = `http://www.runtower.co.kr/picture/${datePart}/${product["이미지파일1"]}`;
+      } else {
+        product["대표이미지"] = "";
+      }
+      
+      // 추가이미지 필드 추가 (형식: http://www.runtower.co.kr/picture/날짜/이미지파일명)
+      const additionalImages = [];
+      
+      // 이미지파일2가 있으면 추가
+      if (product["이미지파일2"]) {
+        additionalImages.push(`http://www.runtower.co.kr/picture/${datePart}/${product["이미지파일2"]}`);
+      } else if (product["이미지파일1"]) {
+        // 이미지파일2가 없으면 이미지파일1 사용
+        additionalImages.push(`http://www.runtower.co.kr/picture/${datePart}/${product["이미지파일1"]}`);
+      }
+      
+      // 이미지파일3이 있으면 추가
+      if (product["이미지파일3"]) {
+        additionalImages.push(`http://www.runtower.co.kr/picture/${datePart}/${product["이미지파일3"]}`);
+      } else if (product["이미지파일1"]) {
+        // 이미지파일3이 없으면 이미지파일1 사용
+        additionalImages.push(`http://www.runtower.co.kr/picture/${datePart}/${product["이미지파일1"]}`);
+      }
+      
+      // 항상 3개의 이미지 URL이 있도록 보장
+      while (additionalImages.length < 3) {
+        if (product["이미지파일1"]) {
+          additionalImages.push(`http://www.runtower.co.kr/picture/${datePart}/${product["이미지파일1"]}`);
+        } else {
+          additionalImages.push("");
+        }
+      }
+      
+      // 줄바꿈으로 이미지 URL 구분
+      product["추가이미지"] = additionalImages.length > 0 ? additionalImages.join("\n") : "";
+      
+      // 상세설명 필드 추가 (HTML 이미지 태그 형식)
+      // 이미지 태그 생성
+      let imgTags = "<center>\n";
+      
+      // 3개의 이미지 태그 추가
+      for (let i = 1; i <= 3; i++) {
+        const imgFilename = product[`이미지파일${i}`];
+        if (imgFilename) {
+          const imgUrl = `http://www.runtower.co.kr/picture/${datePart}/${imgFilename}`;
+          imgTags += `<img src="${imgUrl}">\n`;
+        } else if (product["이미지파일1"]) {
+          // 해당 이미지가 없으면 첫 번째 이미지 사용
+          const imgUrl = `http://www.runtower.co.kr/picture/${datePart}/${product["이미지파일1"]}`;
+          imgTags += `<img src="${imgUrl}">\n`;
+        }
+      }
+      
+      // 마지막에 고정 이미지 추가
+      imgTags += '<img src="http://www.runtower.co.kr/notice/all_bottom.png">\n';
+      imgTags += "</center>";
+      
+      product["상세설명"] = imgTags;
+    }
+    
+    // 엑셀 워크북 생성
+    const wb = xlsx.utils.book_new();
+    
+    // 데이터 컬럼 순서 지정
+    const columns = [
+      "판매자 상품코드", "상품 링크", "상품명", "숫자 가격", 
+      "이미지1", "이미지파일1", "이미지2", "이미지파일2", "이미지3", "이미지파일3",
+      "대표이미지", "추가이미지", "상세설명"
+    ];
+    
+    // 지정된 순서로 데이터 재정렬
+    const orderedProducts = products.map(product => {
+      const orderedProduct = {};
+      columns.forEach(column => {
+        orderedProduct[column] = product[column] || "";
+      });
+      return orderedProduct;
+    });
+    
+    // 데이터프레임 생성
+    const ws = xlsx.utils.json_to_sheet(orderedProducts);
+    
+    // 워크시트 추가
+    xlsx.utils.book_append_sheet(wb, ws, "Sheet1");
+    
+    // 열 너비 설정 (간접적으로 구현)
+    const colWidths = {
+      A: 11,  // 판매자 상품코드
+      B: 10,  // 상품 링크
+      C: 10,  // 상품명
+      D: 5,   // 숫자 가격
+      E: 5,   // 이미지1
+      F: 5,   // 이미지파일1
+      G: 5,   // 이미지2
+      H: 5,   // 이미지파일2
+      I: 5,   // 이미지3
+      J: 5,   // 이미지파일3
+      K: 48,  // 대표이미지
+      L: 49,  // 추가이미지
+      M: 60   // 상세설명
+    };
+    
+    // 엑셀 파일 저장
+    await writeFile(filename, xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+    
+    // 파일 생성 확인
+    if (fs.existsSync(filename)) {
+      onLog(`\n크롤링 결과가 성공적으로 저장되었습니다.`);
+      onLog(`파일 경로: ${filename}`);
+      
+      // 엑셀 파일의 상대 경로 반환 (다운로드 링크용)
+      const relativePath = path.relative(process.cwd(), filename);
+      return relativePath;
+    } else {
+      onLog("\n파일 저장 실패: 파일이 생성되지 않았습니다.");
+      return null;
+    }
+  } catch (error) {
+    onLog(`\n파일 저장 중 오류 발생: ${error.message}`);
+    onLog(error.stack);
+    throw error;
+  }
+}
