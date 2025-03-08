@@ -79,3 +79,86 @@ async function processImage(imgPath) {
     throw new Error(`이미지 처리 중 오류: ${error.message}`);
   }
 }
+// 브라우저 설정 함수
+async function setupBrowser() {
+  return await puppeteer.launch({
+    headless: true,
+    args: [
+      '--window-size=1024,768',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-gpu', 
+      '--disable-extensions',
+      '--disable-infobars',
+      '--no-sandbox',
+      '--disable-setuid-sandbox'
+    ],
+    defaultViewport: { width: 1024, height: 768 },
+  });
+}
+
+// 상품 상세 페이지 크롤링 함수
+async function crawlProductDetails(url, index = null, total = null, onLog) {
+  let browser = null;
+  
+  try {
+    if (index !== null && total !== null) {
+      onLog(`\n상품 ${index}/${total} 상세 정보 크롤링 중...`);
+    }
+    
+    browser = await setupBrowser();
+    const page = await browser.newPage();
+    
+    // 자동화 감지 회피
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+    
+    // 유저 에이전트 설정
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36');
+    
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    
+    // 상품명 추출
+    let name = "상품명 없음";
+    try {
+      name = await page.$eval("h1.ProductDetails-header", el => el.textContent.trim());
+    } catch {
+      try {
+        name = await page.$eval(".kds-Text--l.kds-Text--bold", el => el.textContent.trim());
+      } catch {
+        // 계속 진행
+      }
+    }
+    
+    onLog(`상품명: ${name}`);
+    
+    // 가격 추출
+    let priceNumeric = "";
+    try {
+      const priceText = await page.$eval("mark.kds-Price-promotional", el => el.textContent.trim());
+      // 숫자만 추출 (소수점 포함)
+      priceNumeric = priceText.replace(/[^\d.]/g, '');
+    } catch {
+      // 계속 진행
+    }
+    
+    onLog(`숫자 가격: ${priceNumeric}`);
+    
+    // 이미지 URL 추출 (최대 3개)
+    let images = [];
+    
+    // 방법 1: 직접 이미지 URL 추출 (xlarge 크기로 변경)
+    try {
+      const productId = url.split('/').pop().split('?')[0];
+      if (productId) {
+        const baseUrl = "https://www.kroger.com/product/images/xlarge";
+        const imgUrls = [
+          `${baseUrl}/front/${productId}`,
+          `${baseUrl}/back/${productId}`,
+          `${baseUrl}/right/${productId}`
+        ];
+        images = [...imgUrls];
+      }
+    } catch {
+      // 다음 방법 시도
+    }
