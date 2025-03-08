@@ -498,3 +498,77 @@ onLog("\n3. 상품 카드 찾는 중...");
         }
         
         onLog(`\n${currentPage}페이지에서 ${pageLinks.length}개의 상품 링크 추출 성공`);
+// 전체 링크 목록에 추가
+        productLinks.push(...pageLinks);
+        
+        // 다음 페이지로 이동
+        if (pageLinks.length === 0) {
+          onLog("더 이상 상품이 없습니다. 페이지 크롤링을 중단합니다.");
+          break;
+        }
+        
+        currentPage += 1;
+      }
+      
+      // 메인 브라우저 종료
+      if (browser) {
+        await browser.close();
+        browser = null;
+      }
+      
+      // 상세 페이지 크롤링
+      onLog("\n상세 페이지 크롤링 시작...");
+      const totalLinks = productLinks.length;
+      
+      // 사용자가 지정한 최대 크롤링 개수
+      const maxProducts = Math.min(maxItems, totalLinks);
+      onLog(`총 ${totalLinks}개 중 ${maxProducts}개 상품 크롤링 예정`);
+      
+      // 판매자 상품코드 기본값 가져오기
+      const baseProductCode = productCode;
+      
+      // 날짜와 코드 접두사 분리 (예: "20250305-W001" -> "20250305", "W001")
+      const codeParts = baseProductCode.split('-');
+      const datePart = codeParts[0] || dayjs().format("YYYYMMDD");
+      const codePrefix = codeParts[1] || "W001";
+      
+      // 코드 접두사에서 문자 부분과 숫자 부분 분리 (예: "W001" -> "W", "001")
+      const prefixMatch = codePrefix.match(/([A-Za-z]+)(\d+)/);
+      let letterPart = "W";
+      let startNumber = 1;
+      
+      if (prefixMatch) {
+        letterPart = prefixMatch[1];  // 예: "W"
+        startNumber = parseInt(prefixMatch[2], 10);  // 예: "001" -> 1
+      }
+      
+      for (let i = 0; i < Math.min(productLinks.length, maxProducts); i++) {
+        const link = productLinks[i];
+        
+        try {
+          const product = await crawlProductDetails(link, i+1, maxProducts, onLog);
+          if (product) {
+            // 판매자 상품코드 생성 (예: "20250305-W001", "20250305-W002", ...)
+            const currentNumber = startNumber + i;
+            const formattedNumber = String(currentNumber).padStart(3, '0');  // 숫자를 3자리로 포맷팅 (예: 1 -> "001")
+            const productCode = `${datePart}-${letterPart}${formattedNumber}`;
+            
+            // 판매자 상품코드 추가
+            product["판매자 상품코드"] = productCode;
+            
+            // 이미지 파일명 설정 (예: "W001-1.jpg", "W001-2.jpg", "W001-3.jpg")
+            const codeSuffix = `${letterPart}${formattedNumber}`;
+            product["이미지파일1"] = product["이미지1"] !== "이미지 없음" ? `${codeSuffix}-1.jpg` : "";
+            product["이미지파일2"] = product["이미지2"] !== "이미지 없음" ? `${codeSuffix}-2.jpg` : "";
+            product["이미지파일3"] = product["이미지3"] !== "이미지 없음" ? `${codeSuffix}-3.jpg` : "";
+            
+            products.push(product);
+          }
+          
+          // 진행률 업데이트
+          const progress = ((i + 1) / maxProducts) * 100;
+          onProgress(progress);
+        } catch (error) {
+          onLog(`상품 ${i+1} 상세 정보 크롤링 실패: ${error.message}`);
+        }
+      }
