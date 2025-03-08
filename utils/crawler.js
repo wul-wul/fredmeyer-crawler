@@ -254,3 +254,68 @@ async function crawlProductDetails(url, index = null, total = null, onLog) {
     }
   }
 }
+// 상품 페이지 크롤링 메인 함수
+export async function fredfmeyerCrawl({ 
+  url, 
+  maxItems = 200, 
+  downloadImages = true, 
+  productCode = "20250305-W001",
+  onLog = () => {},
+  onProgress = () => {} 
+}) {
+  onLog("=== 프레드메이어 상품 크롤링 시작 ===");
+  onLog(`대상 URL: ${url}`);
+  
+  // 결과 디렉토리 생성
+  const timestamp = dayjs().format("YYYYMMDD_HHmmss");
+  const resultsDir = path.join(process.cwd(), "public", "results");
+  const imagesDir = path.join(resultsDir, `images_${timestamp}`);
+  
+  try {
+    // 결과 디렉토리가 없으면 생성
+    if (!fs.existsSync(resultsDir)) {
+      await mkdir(resultsDir, { recursive: true });
+    }
+    
+    // 이미지 디렉토리 생성
+    if (downloadImages && !fs.existsSync(imagesDir)) {
+      await mkdir(imagesDir, { recursive: true });
+      onLog(`\n새로운 이미지 폴더 생성: ${imagesDir}`);
+    }
+    
+    // URL이 http로 시작하지 않으면 https:// 추가
+    if (!url.startsWith('http')) {
+      url = 'https://' + url.replace(/^\/+/, '');
+    }
+    
+    // 단일 상품 상세 페이지인 경우
+    if (url.includes('/p/')) {
+      const product = await crawlProductDetails(url, null, null, onLog);
+      if (product) {
+        // 판매자 상품코드 기본값 가져오기
+        const [datePart, codePrefix] = productCode.split('-');
+        
+        // 판매자 상품코드 추가
+        product["판매자 상품코드"] = productCode;
+        
+        // 이미지 파일명 설정
+        product["이미지파일1"] = product["이미지1"] !== "이미지 없음" ? `${codePrefix}-1.jpg` : "";
+        product["이미지파일2"] = product["이미지2"] !== "이미지 없음" ? `${codePrefix}-2.jpg` : "";
+        product["이미지파일3"] = product["이미지3"] !== "이미지 없음" ? `${codePrefix}-3.jpg` : "";
+        
+        if (downloadImages) {
+          await downloadProductImages([product], imagesDir, onLog);
+        }
+        
+        const filePath = await saveToExcel([product], resultsDir, timestamp, onLog);
+        onLog("\n크롤링이 완료되었습니다.");
+        return { filePath, count: 1 };
+      }
+      return { filePath: null, count: 0 };
+    }
+    
+    // 상품 목록 페이지인 경우 크롤링
+    let browser = null;
+    const products = [];
+    const productLinks = [];
+    let currentPage = 1;
