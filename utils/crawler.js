@@ -319,3 +319,89 @@ export async function fredfmeyerCrawl({
     const products = [];
     const productLinks = [];
     let currentPage = 1;
+try {
+      browser = await setupBrowser();
+      const page = await browser.newPage();
+      
+      // 자동화 감지 회피
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      });
+      
+      // 유저 에이전트 설정
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36');
+      
+      // 최대 3페이지까지 크롤링
+      while (currentPage <= 3 && productLinks.length < maxItems) {
+        let currentUrl = url;
+        
+        // 페이지 파라미터 추가 (2페이지부터)
+        if (currentPage > 1) {
+          onLog(`\n${currentPage}페이지로 이동합니다...`);
+          
+          // URL에 페이지 번호 추가
+          const pageRegex = /page=(\d+)/;
+          const pageMatch = currentUrl.match(pageRegex);
+          
+          if (pageMatch) {
+            currentUrl = currentUrl.replace(pageRegex, `page=${currentPage}`);
+          } else {
+            // 페이지 파라미터가 없는 경우 추가
+            currentUrl += currentUrl.includes('?') ? `&page=${currentPage}` : `?page=${currentPage}`;
+          }
+          
+          await page.goto(currentUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+          await page.waitForTimeout(5000);  // 페이지 로딩 대기
+        }
+        
+        onLog(`\n${currentPage}페이지 크롤링 중...`);
+        
+        if (currentPage === 1) {
+          onLog("\n1. 페이지 로딩 중...");
+          await page.goto(currentUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+          await page.waitForTimeout(5000);
+        }
+        
+        onLog("2. 페이지 스크롤 중...");
+        
+        // 여러 번 스크롤하여 더 많은 상품 로드
+        let prevHeight = 0;
+        const maxScrollAttempts = 15;
+        
+        for (let scrollAttempt = 0; scrollAttempt < maxScrollAttempts; scrollAttempt++) {
+          // 페이지 끝까지 스크롤
+          await page.evaluate(() => {
+            window.scrollTo(0, document.body.scrollHeight);
+          });
+          
+          await page.waitForTimeout(3000);  // 로딩 대기
+          
+          // 현재 스크롤 높이 확인
+          const currentHeight = await page.evaluate(() => document.body.scrollHeight);
+          
+          // 현재 상품 카드 수 확인
+          const currentCards = await page.$$eval(".ProductCard", els => els.length);
+          
+          // 스크롤 진행 상황 로깅
+          onLog(`  스크롤 ${scrollAttempt+1}/${maxScrollAttempts} 완료 (높이: ${currentHeight}, 상품 수: ${currentCards})`);
+          
+          // 더 이상 새로운 컨텐츠가 로드되지 않으면 스크롤 중단
+          if (currentHeight === prevHeight && scrollAttempt > 0) {
+            onLog("  더 이상 새로운 컨텐츠가 로드되지 않습니다. 스크롤 중단");
+            break;
+          }
+          
+          // 중간에 한번 더 스크롤 (긴 페이지에서 더 많은 상품 로드)
+          if (scrollAttempt % 3 === 2) {
+            await page.evaluate(() => {
+              window.scrollBy(0, -500);
+            });
+            await page.waitForTimeout(1000);
+            await page.evaluate(() => {
+              window.scrollBy(0, 500);
+            });
+            await page.waitForTimeout(1000);
+          }
+          
+          prevHeight = currentHeight;
+        }
