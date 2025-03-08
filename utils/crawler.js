@@ -405,3 +405,96 @@ try {
           
           prevHeight = currentHeight;
         }
+onLog("\n3. 상품 카드 찾는 중...");
+        
+        // 상품 카드 찾기 (여러 선택자 시도)
+        let productCards = [];
+        
+        // 방법 1: ProductCard 클래스로 찾기
+        productCards = await page.$$(".ProductCard");
+        onLog(`방법 1: ${productCards.length}개의 상품 카드 발견 (ProductCard 클래스)`);
+        
+        // 방법 2: 상품 링크로 직접 찾기
+        if (productCards.length < 5) {
+          productCards = await page.$$("a[href*='/p/']");
+          onLog(`방법 2: ${productCards.length}개의 상품 카드 발견 (상품 링크)`);
+        }
+        
+        // 방법 3: 일반 상품 컨테이너 찾기
+        if (productCards.length < 5) {
+          productCards = await page.$$(".kds-Card");
+          onLog(`방법 3: ${productCards.length}개의 상품 카드 발견 (kds-Card)`);
+        }
+        
+        onLog(`\n총 ${productCards.length}개의 상품 카드 발견`);
+        
+        // 상품 링크 목록 수집
+        let pageLinks = [];
+        
+        // 방법 1: 카드에서 링크 추출
+        for (const card of productCards) {
+          try {
+            // 카드 자체가 링크인 경우
+            const tagName = await page.evaluate(el => el.tagName.toLowerCase(), card);
+            
+            if (tagName === 'a') {
+              const href = await page.evaluate(el => el.getAttribute('href'), card);
+              
+              if (href && href.includes('/p/')) {
+                let link = href;
+                if (!link.startsWith('http')) {
+                  link = 'https://www.fredmeyer.com' + link;
+                }
+                
+                if (!pageLinks.includes(link)) {
+                  pageLinks.push(link);
+                }
+              }
+            } else {
+              // 카드 내부에서 링크 찾기
+              const linkElements = await card.$$("a[href*='/p/']");
+              for (const linkElem of linkElements) {
+                const href = await page.evaluate(el => el.getAttribute('href'), linkElem);
+                
+                if (href) {
+                  let link = href;
+                  if (!link.startsWith('http')) {
+                    link = 'https://www.fredmeyer.com' + link;
+                  }
+                  
+                  if (!pageLinks.includes(link)) {
+                    pageLinks.push(link);
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            // 계속 진행
+          }
+        }
+        
+        // 방법 2: 페이지 전체에서 상품 링크 찾기 (백업 방법)
+        if (pageLinks.length < 10) {
+          onLog("  카드에서 충분한 링크를 찾지 못했습니다. 페이지 전체에서 링크를 찾습니다.");
+          try {
+            const allLinks = await page.$$("a[href*='/p/']");
+            for (const linkElem of allLinks) {
+              const href = await page.evaluate(el => el.getAttribute('href'), linkElem);
+              
+              if (href) {
+                let link = href;
+                if (!link.startsWith('http')) {
+                  link = 'https://www.fredmeyer.com' + link;
+                }
+                
+                if (!pageLinks.includes(link)) {
+                  pageLinks.push(link);
+                }
+              }
+            }
+          } catch (error) {
+            // 계속 진행
+          }
+        }
+        
+        onLog(`\n${currentPage}페이지에서 ${pageLinks.length}개의 상품 링크 추출 성공`);
