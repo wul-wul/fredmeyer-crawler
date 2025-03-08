@@ -190,11 +190,11 @@ export default function Home() {
           <div className={styles.result}>
             
               href={`/api/download?path=${encodeURIComponent(resultPath)}`}
-              className={styles.downloadButton}
-              download
-            >
-              결과 파일 다운로드
-            </a>
+  className={styles.downloadButton}
+  download
+>
+  결과 파일 다운로드
+</a>
           </div>
         )}
       </main>
